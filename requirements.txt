@@ -1,5 +1,2 @@
 streamlit
 google-genai
-pyyaml
-requests
-Pillow
