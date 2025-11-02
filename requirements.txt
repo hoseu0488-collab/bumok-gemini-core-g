@@ -1,4 +1,6 @@
 streamlit
 streamlit-oauth
-# 사용한 다른 모든 라이브러리들... (예: google-genai, requests 등)
-pyyaml  # <<=== 이것을 추가합니다!
+pyyaml
+google-genai  # <<=== 이것을 추가합니다!
+requests
+# 기타 필요한 라이브러리들...
