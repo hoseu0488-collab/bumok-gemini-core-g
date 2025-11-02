@@ -2,4 +2,4 @@ streamlit
 google-genai
 pyyaml
 requests
-Pillow  # <<=== 이것을 추가합니다!
+Pillow
