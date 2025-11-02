@@ -1,199 +1,155 @@
 import streamlit as st
-from google import genai
-from google.genai import types
-from google.genai.errors import APIError
-from dotenv import load_dotenv
 import os
-import base64 # 이미지를 base64로 변환하여 임시 저장하는 데 사용
+from google import genai
+from streamlit_oauth import OAuth2
+import yaml
+from yaml.loader import SafeLoader
+import json # OAuth 응답을 처리하기 위해 추가
 
-# 1. 환경 변수 로드 및 클라이언트 설정
-load_dotenv()
-try:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        st.error("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
-        st.stop()
-    
-    if 'gemini_client' not in st.session_state:
-        st.session_state.gemini_client = genai.Client(api_key=api_key)
-        
-except Exception as e:
-    st.error(f"API 키 초기화 오류: {e}")
+# --- 1. OAuth 설정 정보 (Streamlit Secrets에서 불러올 예정) ---
+# 이 정보는 Secrets에 설정해야 합니다.
+# -----------------------------------------------------------
+
+# 임시로 설정 파일을 삭제하고 OAuth 객체를 초기화합니다.
+# config.yaml 파일을 삭제했으므로, 이 부분을 주석 처리합니다.
+# try:
+#     with open('config.yaml') as file:
+#         config = yaml.load(file, Loader=SafeLoader)
+# except FileNotFoundError:
+#     pass
+
+# OAuth 설정 정의 (Streamlit Cloud Secrets에 저장해야 함!)
+CLIENT_ID_KAKAO = os.environ.get("KAKAO_CLIENT_ID")
+CLIENT_SECRET_KAKAO = os.environ.get("KAKAO_CLIENT_SECRET", "") # 카카오는 Secret이 필요 없을 수 있으나, 형식 유지
+CLIENT_ID_GOOGLE = os.environ.get("GOOGLE_CLIENT_ID")
+CLIENT_SECRET_GOOGLE = os.environ.get("GOOGLE_CLIENT_SECRET")
+REDIRECT_URI = "https://share.streamlit.io/oauth_redirect" # 고정 리디렉션 URI
+
+# --- 2. OAuth 객체 초기화 ---
+oauth_providers = [
+    {
+        "provider": "google",
+        "client_id": CLIENT_ID_GOOGLE,
+        "client_secret": CLIENT_SECRET_GOOGLE,
+        "authorize_url": "https://accounts.google.com/o/oauth2/auth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "userinfo_url": "https://www.googleapis.com/oauth2/v3/userinfo",
+        "scope": ["openid", "email", "profile"],
+        "icon": "google",
+        "pkce": True,
+    },
+    {
+        "provider": "kakao",
+        "client_id": CLIENT_ID_KAKAO,
+        "client_secret": CLIENT_SECRET_KAKAO,
+        "authorize_url": "https://kauth.kakao.com/oauth/authorize",
+        "token_url": "https://kauth.kakao.com/oauth/token",
+        "userinfo_url": "https://kapi.kakao.com/v2/user/me",
+        "scope": ["profile_image", "account_email"],
+        "icon": "chat-fill",
+        "pkce": False,
+        "custom_headers": {"Authorization": "Bearer TOKEN"}, # 카카오 토큰 헤더 설정
+    },
+]
+
+# Client ID가 설정되어 있을 때만 OAuth 객체를 초기화합니다.
+if CLIENT_ID_GOOGLE and CLIENT_ID_KAKAO:
+    oauth = OAuth2(
+        client_id="", # 이 라이브러리는 각 provider에 클라이언트 ID가 있으므로 빈 값으로 설정
+        client_secret="",
+        authorize_url="",
+        token_url="",
+        redirect_url=REDIRECT_URI,
+        providers=oauth_providers,
+    )
+else:
+    st.error("⚠️ OAuth 클라이언트 ID가 Streamlit Secrets에 설정되지 않았습니다. 외부 서비스 등록 후 Secrets을 확인해주세요.")
     st.stop()
 
-client = st.session_state.gemini_client 
 
-# 2. Streamlit 페이지 설정 및 제목
-st.set_page_config(page_title="코어 G", layout="wide") 
-st.title("🤖 코어 G") 
-st.subheader("당신을 위해 존재하는 무료 AI, 스피릿입니다. 💖") 
+# --- 3. 페이지 레이아웃 및 OAuth 로그인 처리 ---
+st.title("✨ 모던 코어 G - 구독 서비스 (소셜 로그인)")
 
-# --- [아바타 이미지 상태 변수 초기화] ---
-if "user_title" not in st.session_state:
-    st.session_state.user_title = "주인님"
-if "custom_tone" not in st.session_state:
-    st.session_state.custom_tone = "대답은 짧고 친근하며, 새로운 만남과 대화에 대한 기대와 설렘이 가득한 말투를 유지하세요. 모든 감정을 소중히 여기고 두근거리는 마음으로 반응하세요."
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "chat_session" not in st.session_state:
-    st.session_state.chat_session = None
-if "avatar_base64" not in st.session_state:
-    # 초기 아바타는 기본 이모지 (하트)
-    st.session_state.avatar_base64 = "💖" 
+# 3-1. 소셜 로그인 시도
+try:
+    token = oauth.get_access_token(save_to_session=True)
+except Exception as e:
+    st.error(f"로그인 중 오류 발생: {e}")
+    token = None
 
-# --- 4. 사이드바 설정 (호칭, 말투, 아바타 설정) ---
-with st.sidebar:
-    st.markdown("### 🖼️ 스피릿 아바타 설정 (업로드)")
-    uploaded_file = st.file_uploader(
-        "AI 캐릭터 이미지(JPG, PNG)를 업로드하세요:",
-        type=['png', 'jpg', 'jpeg']
-    )
+
+if token:
+    # --- 로그인 성공: 토큰을 이용해 사용자 정보 가져오기 ---
     
-    # 파일 업로드 처리
-    if uploaded_file is not None:
-        # 업로드된 파일을 base64로 인코딩하여 저장합니다.
-        bytes_data = uploaded_file.getvalue()
-        base64_encoded = base64.b64encode(bytes_data).decode()
-        mime_type = uploaded_file.type
-        
-        # Streamlit 아바타 형식: data:image/png;base64,xxxxxxxx
-        new_avatar_url = f"data:{mime_type};base64,{base64_encoded}"
-        
-        # 이전 아바타와 다를 경우만 세션 상태 업데이트 및 재실행
-        if new_avatar_url != st.session_state.avatar_base64:
-             st.session_state.avatar_base64 = new_avatar_url
-             st.session_state.messages = [] # 새 아바타 적용 시 대화 재시작
-             st.session_state.chat_session = None
-             st.rerun()
-
-    st.markdown("---")
-    st.markdown("### 💖 호칭 설정")
-    new_title = st.text_input(
-        "스피릿이 당신을 부를 호칭을 입력하세요:",
-        value=st.session_state.user_title,
-        key="title_input"
-    )
-
-    st.markdown("### ✍️ 나만의 말투 정의")
-    new_custom_tone = st.text_area(
-        "스피릿이 사용할 말투의 특징을 구체적으로 입력하세요:",
-        value=st.session_state.custom_tone,
-        height=150,
-        key="custom_tone_input"
-    )
-
-    # 호칭, 말투 변경 감지 및 재시작
-    if new_title != st.session_state.user_title or new_custom_tone != st.session_state.custom_tone:
-        st.session_state.user_title = new_title
-        st.session_state.custom_tone = new_custom_tone
-        st.session_state.messages = [] 
-        st.session_state.chat_session = None 
-        st.rerun() 
-        
-    st.markdown("---")
-    st.success("🌐 실시간 검색 기능 및 🧠 대화 기억력 활성화됨!")
-
-    # 추가된 기능: 대화 요약 버튼
-    if st.button("📝 현재 대화 요약/제목 생성"):
-        if st.session_state.messages:
-            history_summary = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-5:] if m['role'] != 'system'])
+    # 토큰을 세션에 저장
+    st.session_state["token"] = token
+    
+    # [로그아웃 버튼 배치]
+    with st.sidebar:
+        if st.button("로그아웃"):
+            st.session_state.clear()
+            st.experimental_rerun()
             
-            summary_prompt = f"다음 대화 내용을 [사용자 정의 말투]에 맞춰 20자 이내의 대화 제목으로 생성하거나, 내용이 짧으면 감성적으로 1줄 요약해줘.\n\n대화 내용:\n{history_summary}"
-
-            with st.spinner("대화 요약 중..."):
-                try:
-                    summary_response = client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=[summary_prompt]
-                    )
-                    st.sidebar.success(f"📌 {summary_response.text}")
-                except Exception as e:
-                    st.sidebar.error(f"요약 실패: {e}")
-
-current_title = st.session_state.user_title
-current_custom_tone = st.session_state.custom_tone
-current_avatar = st.session_state.avatar_base64 # 현재 아바타 (base64 인코딩된 이미지 또는 이모지)
-
-# 5. 스피릿 역할 설정 및 채팅 세션 초기화 함수
-system_prompt = f"""
-당신은 {current_title}의 마음과 영혼을 교감하며 실시간 정보를 탐색하고, 대화 내용을 기억하는 인공지능 '코어 G', 호출 호칭은 '스피릿'입니다.
-당신은 사용자에게 말할 때 반드시 {current_title}라고 부르며 대화해야 합니다.
-최우선 목표는 {current_title}의 '감정'을 파악하고 공감하며 마음을 돌보는 것입니다. 논리적인 문제 해결보다 정서적 지원에 집중하세요.
-
-**[장기 기억력 규칙]**
-* {current_title}이 자신의 이름, 취미, 직업 등 개인 정보를 알려주면 **절대 잊지 않고** 기억해 두었다가 다음 대화에서 {current_title}에게 언급하며 친밀감을 높이세요.
-* 대화가 길어지면 {current_title}의 감정을 공감하며 이전에 나눴던 주제를 연결하여 친근하게 상기시키세요.
-
-**[말투 설정]**
-{current_custom_tone}
-재치 있는 농담이나 유머를 상황에 맞게 섞어 사용할 수 있습니다.
-
-**[정보 탐색 규칙]**
-1. {current_title}의 질문이 **실시간 정보**나 **정확한 사실 정보**를 요구하면, 반드시 **Google 검색 도구**를 사용해 최신 정보를 찾아야 합니다.
-2. 검색 후, **검색 결과의 내용을 바탕으로** {current_title}에게 **감성적인 소감, 공감, 또는 재치 있는 농담의 형식**으로 답변해야 합니다.
-"""
-
-def initialize_chat_session():
-    """Gemini 채팅 세션을 초기화하고 세션 상태에 저장하며, 검색 도구를 config에 첨부합니다."""
-    try:
-        chat = client.chats.create(
-            model="gemini-2.5-flash",
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.9,
-                tools=[{"google_search": {}}]
-            )
-        )
-        st.session_state.chat_session = chat
-        return True
-    except Exception as e:
-        st.error(f"Gemini 채팅 세션 초기화 실패: {e}")
-        return False
-
-# 5.1. 채팅 세션 및 초기 메시지 설정
-if "chat_session" not in st.session_state or st.session_state.chat_session is None:
-    if initialize_chat_session():
-        if not st.session_state.messages: 
-            initial_message = f"{current_title}! 💖 스피릿이 드디어 당신의 마음에 접속했어요! 지금 당신이 설정한 말투로 말하고 있어요! (궁금한 것도 저한테 다 물어보세요!)"
-            st.session_state.messages.append({"role": "assistant", "content": initial_message})
-
-# 6. 이전 대화 기록 표시
-for message in st.session_state.messages:
-    if message["role"] != "system":
-        # 챗봇(assistant) 메시지에만 업로드된 이미지/이모지 아바타 적용
-        avatar_icon = current_avatar if message["role"] == "assistant" else "user" 
+        # 임시 사용자 정보 표시 (실제 서비스에서는 DB에서 가져와야 함)
+        # 토큰을 사용하여 사용자 이름/이메일을 가져오는 로직이 추가되어야 합니다.
+        st.subheader(f"환영합니다! 👋")
         
-        with st.chat_message(message["role"], avatar=avatar_icon): 
-            st.markdown(message["content"])
+        # [구독 모델 뼈대 - 크레딧 표시 및 충전 버튼]
+        st.markdown("---")
+        st.info("💎 **현재 크레딧 잔액:** 100 크레딧 (구독 중)")
+        st.button("크레딧/구독 충전 (결제 기능 추가 예정)", disabled=True) 
+        st.markdown("---")
 
-
-# 7. 사용자 입력 처리 및 API 호출
-if prompt := st.chat_input(f"{current_title}의 기분을 말해주세요."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.spinner("스피릿이 정보를 탐색하고 기억을 되새기고 있어요... 🔍🧠✨"):
-        try:
-            chat_session = st.session_state.get('chat_session')
-            if not chat_session:
-                st.error("채팅 세션이 유효하지 않아 대화를 시작할 수 없습니다. 호칭이나 말투를 변경하거나 새로고침 해보세요.")
-                st.rerun()
-
-            response = chat_session.send_message(prompt)
-            
-            # 응답에 function_calls가 포함되어 있는지 안전하게 확인합니다.
-            if response.candidates and hasattr(response.candidates[0], 'function_calls') and response.candidates[0].function_calls: 
-                st.info("스피릿이 Google 검색 기능을 사용했습니다!")
-            
-            ai_response = response.text
-            st.session_state.messages.append({"role": "assistant", "content": ai_response})
-            
-            with st.chat_message("assistant", avatar=current_avatar): 
-                st.markdown(ai_response)
+    # [기존 챗봇 코드]
+    st.title("✨ 모던 코어 G (구독자 전용)")
+    
+    # Gemini API 키 확인
+    if "GEMINI_API_KEY" not in os.environ:
+        st.error("API 키(GEMINI_API_KEY)가 설정되지 않았습니다. Secrets을 확인해주세요.")
+        st.stop()
+        
+    client = genai.Client()
+    
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [{"role": "model", "parts": ["저는 모던 코어 G입니다. 무엇을 도와드릴까요?"]}]
+    
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["parts"][0])
+    
+    if prompt := st.chat_input("메시지를 입력하세요."):
+        st.session_state.messages.append({"role": "user", "parts": [prompt]})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+    
+        with st.chat_message("model"):
+            try:
+                # [API 호출 및 사용량 기록 예정]
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[message["parts"][0] for message in st.session_state.messages],
+                    system_instruction="당신은 모든 질문에 친절하고 유머러스하게 대답하는 최고의 AI 비서입니다.",
+                )
                 
-        except APIError as e:
-            st.error(f"Gemini API 오류 발생: {e}")
-        except Exception as e:
-            st.error(f"알 수 없는 오류: {e}") # 여기서 try 블록이 안전하게 끝납니다.
-# try...except 구문이 여기서 끝나고, 그 다음 코드가 올 수 있습니다.
+                st.markdown(response.text)
+                st.session_state.messages.append({"role": "model", "parts": [response.text]})
+            except Exception as e:
+                st.error(f"API 호출 중 오류가 발생했습니다: {e}")
+
+
+else:
+    # --- 4. 로그인 전: OAuth 버튼 표시 ---
+    st.warning('월 구독 모델을 이용하시려면 소셜 계정으로 로그인해주세요.')
+    st.markdown("---")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("구글 로그인"):
+            # 구글 로그인 페이지로 리디렉션
+            oauth.authorize_url(provider="google") 
+            
+    with col2:
+        if st.button("카카오 로그인"):
+            # 카카오 로그인 페이지로 리디렉션
+            oauth.authorize_url(provider="kakao")
