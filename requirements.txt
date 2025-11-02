@@ -1,6 +1,5 @@
 streamlit
 streamlit-oauth
 pyyaml
-google-genai  # <<=== 이것을 추가합니다!
+google-genai
 requests
-# 기타 필요한 라이브러리들...
