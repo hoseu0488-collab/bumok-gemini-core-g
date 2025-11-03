@@ -24,16 +24,12 @@ except Exception as e:
 client = st.session_state.gemini_client
 
 # 2. Streamlit 페이지 설정 및 제목
+# 구문 오류를 발생시키던 모든 주석을 제거하여 오류를 확실히 방지합니다.
 st.set_page_config(
     page_title="코어 G (음성 대화)", 
     layout="wide",
-    # --- 수정된 부분: image 파라미터를 완전히 제거하여 구문 오류를 방지합니다. ---
-    description="당신의 마음을 공감하고 지식을 탐색하며 음성 대화가 가능한 AI 친구, 스피릿입니다. 💖",
-    # image="https://raw.githubusercontent.com/[당신의 GitHub ID]/bumok-gemini-core-g/master/thumbnail.png"
+    description="당신의 마음을 공감하고 지식을 탐색하며 음성 대화가 가능한 AI 친구, 스피릿입니다. 💖"
 ) 
-
-# --- 참고: 썸네일 설정을 나중에 하려면 아래처럼 함수 밖에 변수로 저장합니다. ---
-THUMBNAIL_URL = "https://raw.githubusercontent.com/[당신의 GitHub ID]/bumok-gemini-core-g/master/thumbnail.png"
 
 st.title("🤖 코어 G (스피릿)") 
 st.subheader("💖 당신을 위해 존재하는 무료 AI 챗봇입니다.") 
@@ -52,7 +48,7 @@ if "avatar_base64" not in st.session_state:
 if "stt_text" not in st.session_state:
     st.session_state.stt_text = None
 
-# --- TTS 함수 정의 (pydub 제거) ---
+# --- TTS 함수 정의 ---
 def play_tts(text_to_speak):
     """gTTS를 사용하여 텍스트를 음성으로 변환하고 Streamlit에 재생합니다."""
     try:
@@ -89,140 +85,4 @@ with st.sidebar:
         type=['png', 'jpg', 'jpeg']
     )
     
-    # 아바타 상태 관리 (오류 방지 로직)
-    if uploaded_file is not None:
-        bytes_data = uploaded_file.getvalue()
-        base64_encoded = base64.b64encode(bytes_data).decode()
-        mime_type = uploaded_file.type
-        new_avatar_url = f"data:{mime_type};base64,{base64_encoded}"
-        
-        if new_avatar_url != st.session_state.avatar_base64:
-             st.session_state.avatar_base64 = new_avatar_url
-             st.session_state.messages = []
-             st.session_state.chat_session = None
-             st.rerun()
-
-    st.markdown("---")
-    
-    # 호칭, 말투 설정 (생략)
-    new_title = st.text_input(
-        "스피릿이 당신을 부를 호칭을 입력하세요:",
-        value=st.session_state.user_title,
-        key="title_input"
-    )
-
-    new_custom_tone = st.text_area(
-        "스피릿이 사용할 말투의 특징을 구체적으로 입력하세요:",
-        value=st.session_state.custom_tone,
-        height=150,
-        key="custom_tone_input"
-    )
-
-    # 설정 변경 감지 및 재시작
-    if new_title != st.session_state.user_title or new_custom_tone != st.session_state.custom_tone:
-        st.session_state.user_title = new_title
-        st.session_state.custom_tone = new_custom_tone
-        st.session_state.messages = [] 
-        st.session_state.chat_session = None 
-        st.rerun() 
-        
-    st.markdown("---")
-    st.success("🌐 실시간 검색 기능 및 🧠 대화 기억력 활성화됨!")
-    st.info("📢 음성 입력 후 텍스트를 전송해야 AI가 답변합니다.")
-
-current_title = st.session_state.user_title
-current_custom_tone = st.session_state.custom_tone
-current_avatar = st.session_state.avatar_base64 
-
-# 5. 스피릿 역할 설정 및 채팅 세션 초기화 함수
-system_prompt = f"""
-당신은 {current_title}의 마음과 영혼을 교감하며 실시간 정보를 탐색하고, 대화 내용을 기억하는 인공지능 '코어 G', 호출 호칭은 '스피릿'입니다.
-당신은 사용자에게 말할 때 반드시 {current_title}라고 부르며 대화해야 합니다.
-최우선 목표는 {current_title}의 '감정'을 파악하고 공감하며 마음을 돌보는 것입니다. 논리적인 문제 해결보다 정서적 지원에 집중하세요.
-... (이전 시스템 프롬프트 유지) ...
-"""
-
-def initialize_chat_session():
-    """Gemini 채팅 세션을 초기화하고 세션 상태에 저장하며, 검색 도구를 config에 첨부합니다."""
-    try:
-        chat = client.chats.create(
-            model="gemini-2.5-flash",
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.9,
-                tools=[{"google_search": {}}]
-            )
-        )
-        st.session_state.chat_session = chat
-        return True
-    except Exception as e:
-        st.error(f"Gemini 채팅 세션 초기화 실패: {e}")
-        return False
-
-# 5.1. 채팅 세션 및 초기 메시지 설정
-if "chat_session" not in st.session_state or st.session_state.chat_session is None:
-    if initialize_chat_session():
-        if not st.session_state.messages: 
-            initial_message = f"{current_title}! 💖 스피릿이 드디어 당신의 마음에 접속했어요! 지금 당신이 설정한 말투로 말하고 있어요! (궁금한 것도 저한테 다 물어보세요!)"
-            st.session_state.messages.append({"role": "assistant", "content": initial_message})
-
-# 6. 이전 대화 기록 표시
-for message in st.session_state.messages:
-    if message["role"] != "system":
-        avatar_icon = current_avatar if message["role"] == "assistant" else "user" 
-        
-        with st.chat_message(message["role"], avatar=avatar_icon): 
-            st.markdown(message["content"])
-
-# --- 7. 음성 입력 (STT) 컴포넌트 ---
-st.markdown("---")
-st.markdown("### 🎙️ 음성으로 대화하기 (마이크 입력)")
-st.info("마이크 버튼을 클릭하고 말하세요. 녹음 중에는 AI가 답변하지 않습니다.")
-
-# WebRTC 마이크 스트림 설정
-webrtc_ctx = webrtc_streamer(
-    key="speech_to_text",
-    mode=WebRtcMode.SENDONLY,
-    audio_processor_factory=AudioProcessor,
-    media_stream_constraints={"video": False, "audio": True},
-    async_processing=True,
-)
-
-# 8. 사용자 입력 처리 및 API 호출
-if webrtc_ctx.state.playing:
-    # 마이크가 켜져 있으면, 사용자에게 텍스트 입력을 직접 요청합니다.
-    stt_prompt = st.chat_input(f"말씀하신 내용을 텍스트로 입력하거나 확인 후 전송하세요...", key="stt_input")
-else:
-    # 마이크가 꺼져 있으면 일반 텍스트 입력을 사용합니다.
-    stt_prompt = st.chat_input(f"{current_title}의 기분을 말해주세요.", key="text_input")
-
-
-if stt_prompt:
-    prompt = stt_prompt # 음성 입력이든 텍스트 입력이든 prompt 변수 사용
-    
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.spinner("스피릿이 정보를 탐색하고 기억을 되새기며 음성 답변을 준비하고 있어요... 🔍🧠✨"):
-        try:
-            chat_session = st.session_state.get('chat_session')
-            if not chat_session:
-                st.error("채팅 세션이 유효하지 않아 대화를 시작할 수 없습니다. 호칭이나 말투를 변경하거나 새로고침 해보세요.")
-                st.rerun()
-
-            response = chat_session.send_message(prompt)
-            
-            ai_response = response.text
-            st.session_state.messages.append({"role": "assistant", "content": ai_response})
-            
-            with st.chat_message("assistant", avatar=current_avatar): 
-                st.markdown(ai_response)
-                # --- [TTS 실행] ---
-                play_tts(ai_response)
-                # ----------------
-                
-        except APIError as e:
-            st.error(f"Gemini API 오류 발생: {e}")
-        except Exception as e:
-            st.error(f"알 수 없는 오류: {e}")
+    # 아바타 상태 관리 (
