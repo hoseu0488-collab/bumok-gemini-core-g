@@ -27,12 +27,14 @@ client = st.session_state.gemini_client
 st.set_page_config(
     page_title="코어 G (음성 대화)", 
     layout="wide",
-    # --- 수정된 부분: 콤마(,)를 추가했습니다. ---
+    # --- 수정된 부분: image 파라미터를 완전히 제거하여 구문 오류를 방지합니다. ---
     description="당신의 마음을 공감하고 지식을 탐색하며 음성 대화가 가능한 AI 친구, 스피릿입니다. 💖",
-    # 썸네일 이미지를 위해 GitHub Raw URL을 사용하세요 (사용자 지정 필요)
-    # 이 줄은 주석 처리되어 있으므로 앱 실행에 영향을 주지 않습니다.
     # image="https://raw.githubusercontent.com/[당신의 GitHub ID]/bumok-gemini-core-g/master/thumbnail.png"
 ) 
+
+# --- 참고: 썸네일 설정을 나중에 하려면 아래처럼 함수 밖에 변수로 저장합니다. ---
+THUMBNAIL_URL = "https://raw.githubusercontent.com/[당신의 GitHub ID]/bumok-gemini-core-g/master/thumbnail.png"
+
 st.title("🤖 코어 G (스피릿)") 
 st.subheader("💖 당신을 위해 존재하는 무료 AI 챗봇입니다.") 
 
