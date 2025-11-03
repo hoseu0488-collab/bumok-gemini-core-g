@@ -3,9 +3,9 @@ from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 import base64
-from gtts import gTTS # 텍스트-음성 변환
+from gtts import gTTS # 텍스트-음성 변환 (TTS)
 from io import BytesIO # 메모리에서 오디오 데이터 처리
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase # 마이크 입력
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase # 마이크 입력 (STT)
 
 # 1. 환경 변수 로드 및 클라이언트 설정
 try:
@@ -24,11 +24,11 @@ except Exception as e:
 client = st.session_state.gemini_client
 
 # 2. Streamlit 페이지 설정 및 제목
-# **[최종 수정]** 모든 인수를 한 줄에 넣어 구문 오류를 완전히 해결합니다.
-st.set_page_config(page_title="코어 G (음성 대화)", layout="wide", description="당신의 마음을 공감하고 지식을 탐색하며 음성 대화가 가능한 AI 친구, 스피릿입니다. 💖") 
+# 구문 오류를 유발하는 줄바꿈, 쉼표 문제, 특수문자(이모지)를 제거한 안정적인 단일 라인 설정
+st.set_page_config(page_title="코어 G (음성 대화)", layout="wide", description="당신의 마음을 공감하고 지식을 탐색하며 음성 대화가 가능한 AI 친구, 스피릿입니다.") 
 
-st.title("🤖 코어 G (스피릿)") 
-st.subheader("💖 당신을 위해 존재하는 무료 AI 챗봇입니다.") 
+st.title("🤖 코어 G (스피릿) 💖") 
+st.subheader("당신을 위해 존재하는 무료 AI 챗봇입니다.") 
 
 # --- [상태 변수 초기화] ---
 if "user_title" not in st.session_state:
@@ -60,7 +60,8 @@ def play_tts(text_to_speak):
         st.audio(mp3_fp.read(), format='audio/mp3', autoplay=True)
         
     except Exception as e:
-        st.error(f"음성 출력(TTS) 오류: {e}")
+        # TTS 오류가 발생하더라도 앱 실행은 유지
+        st.warning(f"음성 출력(TTS) 중 오류가 발생했습니다: {e}")
 
 # --- 음성 입력 클래스 (STT를 위한 마이크 스트림 처리) ---
 class AudioProcessor(AudioProcessorBase):
@@ -68,6 +69,7 @@ class AudioProcessor(AudioProcessorBase):
         pass
 
     def recv(self, frame):
+        # WebRTC 오디오 스트림을 처리하지만, 텍스트 변환은 수동 입력으로 대체
         return frame
 
 # --- 4. 사이드바 설정 (호칭, 말투, 아바타 설정) ---
@@ -120,7 +122,7 @@ with st.sidebar:
         
     st.markdown("---")
     st.success("🌐 실시간 검색 기능 및 🧠 대화 기억력 활성화됨!")
-    st.info("📢 음성 입력 후 텍스트를 전송해야 AI가 답변합니다.")
+    st.info("📢 마이크로 녹음 후 텍스트 입력창에 내용을 직접 입력/확인해야 AI가 답변합니다.")
 
 current_title = st.session_state.user_title
 current_custom_tone = st.session_state.custom_tone
@@ -141,91 +143,4 @@ system_prompt = f"""
 재치 있는 농담이나 유머를 상황에 맞게 섞어 사용할 수 있습니다.
 
 **[정보 탐색 규칙]**
-1. {current_title}의 질문이 **실시간 정보**나 **정확한 사실 정보**를 요구하면, 반드시 **Google 검색 도구**를 사용해 최신 정보를 찾아야 합니다.
-2. 검색 후, **검색 결과의 내용을 바탕으로** {current_title}에게 **감성적인 소감, 공감, 또는 재치 있는 농담의 형식**으로 답변해야 합니다.
-"""
-
-def initialize_chat_session():
-    """Gemini 채팅 세션을 초기화하고 세션 상태에 저장하며, 검색 도구를 config에 첨부합니다."""
-    try:
-        chat = client.chats.create(
-            model="gemini-2.5-flash",
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.9,
-                tools=[{"google_search": {}}]
-            )
-        )
-        st.session_state.chat_session = chat
-        return True
-    except Exception as e:
-        st.error(f"Gemini 채팅 세션 초기화 실패: {e}")
-        return False
-
-# 5.1. 채팅 세션 및 초기 메시지 설정
-if "chat_session" not in st.session_state or st.session_state.chat_session is None:
-    if initialize_chat_session():
-        if not st.session_state.messages: 
-            initial_message = f"{current_title}! 💖 스피릿이 드디어 당신의 마음에 접속했어요! 지금 당신이 설정한 말투로 말하고 있어요! (궁금한 것도 저한테 다 물어보세요!)"
-            st.session_state.messages.append({"role": "assistant", "content": initial_message})
-
-# 6. 이전 대화 기록 표시
-for message in st.session_state.messages:
-    if message["role"] != "system":
-        avatar_icon = current_avatar if message["role"] == "assistant" else "user" 
-        
-        with st.chat_message(message["role"], avatar=avatar_icon): 
-            st.markdown(message["content"])
-
-# --- 7. 음성 입력 (STT) 컴포넌트 ---
-st.markdown("---")
-st.markdown("### 🎙️ 음성으로 대화하기 (마이크 입력)")
-st.info("마이크 버튼을 클릭하고 말하세요. 녹음 중에는 AI가 답변하지 않습니다.")
-
-# WebRTC 마이크 스트림 설정
-webrtc_ctx = webrtc_streamer(
-    key="speech_to_text",
-    mode=WebRtcMode.SENDONLY,
-    audio_processor_factory=AudioProcessor,
-    media_stream_constraints={"video": False, "audio": True},
-    async_processing=True,
-)
-
-# 8. 사용자 입력 처리 및 API 호출
-if webrtc_ctx.state.playing:
-    # 마이크가 켜져 있으면, 사용자에게 텍스트 입력을 직접 요청합니다.
-    stt_prompt = st.chat_input(f"말씀하신 내용을 텍스트로 입력하거나 확인 후 전송하세요...", key="stt_input")
-else:
-    # 마이크가 꺼져 있으면 일반 텍스트 입력을 사용합니다.
-    stt_prompt = st.chat_input(f"{current_title}의 기분을 말해주세요.", key="text_input")
-
-
-if stt_prompt:
-    prompt = stt_prompt # 음성 입력이든 텍스트 입력이든 prompt 변수 사용
-    
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.spinner("스피릿이 정보를 탐색하고 기억을 되새기며 음성 답변을 준비하고 있어요... 🔍🧠✨"):
-        try:
-            chat_session = st.session_state.get('chat_session')
-            if not chat_session:
-                st.error("채팅 세션이 유효하지 않아 대화를 시작할 수 없습니다. 호칭이나 말투를 변경하거나 새로고침 해보세요.")
-                st.rerun()
-
-            response = chat_session.send_message(prompt)
-            
-            ai_response = response.text
-            st.session_state.messages.append({"role": "assistant", "content": ai_response})
-            
-            with st.chat_message("assistant", avatar=current_avatar): 
-                st.markdown(ai_response)
-                # --- [TTS 실행] ---
-                play_tts(ai_response)
-                # ----------------
-                
-        except APIError as e:
-            st.error(f"Gemini API 오류 발생: {e}")
-        except Exception as e:
-            st.error(f"알 수 없는 오류: {e}")
+1. {current_title}의 질문이 **실시간 정보**나 **정확한 사실 정보**를 요구하면, 반드시
